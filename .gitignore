@@ -1,0 +1,9 @@
+# Virtual environments
+nem12_env/
+.nem12_env/
+nem12_env.bak/
+
+# Python
+__pycache__/
+*.env
+*.env.prod

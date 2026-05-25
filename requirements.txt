@@ -1,0 +1,11 @@
+# --- Data Validation & Serialization (used heavily by FastAPI) ---
+pydantic==2.11.7          # Data validation and settings management using Python type hints.
+pydantic-settings==2.12.0  # For settings management with Pydantic V2.
+
+
+# --- Relational Database (Optional, for structured data) ---
+psycopg==3.2.13           # PostgreSQL adapter for Python 3 (psycopg3, used in setup scripts).
+psycopg-pool==3.2.8       # Connection pooling for psycopg3 (resilient against connection timeouts)
+
+# --- Utilities ---
+python-dotenv==1.0.1      # Loads environment variables from .env files for configuration.
