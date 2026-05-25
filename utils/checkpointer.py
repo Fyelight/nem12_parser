@@ -1,8 +1,9 @@
 import os
 import csv
 import time
+import config.settings as config
 
-STATE_FILE = "nem12_checkpoint.txt"
+STATE_FILE = config.settings.state_file_path
 
 def get_last_byte_position():
     """Reads the last successfully processed byte position."""

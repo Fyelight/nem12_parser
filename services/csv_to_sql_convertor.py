@@ -1,28 +1,25 @@
 import csv
-from adaptors.nem12_stream_adaptor import NEM12StreamAdapter
 import psycopg
 import queue
 import threading
+
+from adaptors.nem12_stream_adaptor import NEM12StreamAdapter
 from datetime import timedelta
 from utils.datetime_formatter import format_date
 from utils.checkpointer import get_last_byte_position, save_byte_position
 from utils.sql_writer import SQLWriter
-
 import config.settings as config
 
 # Configuration
-CSV_INPUT = config.settings.input_file_path
 SQL_OUTPUT = config.settings.output_folder_path
-STATE_FILE = config.settings.state_file_path
 DLQ_REPORT_CSV = config.settings.dlq_report_csv
 DLQ_REPLAY_CSV = config.settings.dlq_replay_csv
-
-BATCH_SIZE = 5000
-FALLBACK_INTERVAL_LENGTH = 30
+BATCH_SIZE = config.settings.batch_size
+SOURCE_TYPE = config.settings.source_type.lower()
 
 batch_queue = queue.Queue(maxsize=20)
 
-def generate_sql_file(source_type="file", source_target=CSV_INPUT):
+def generate_sql_file(source_target: str, source_type=SOURCE_TYPE):
     last_position = get_last_byte_position()
     file_mode = "a" if last_position > 0 else "w"
 
@@ -35,11 +32,11 @@ def generate_sql_file(source_type="file", source_target=CSV_INPUT):
     print(f"Resuming file stream pointer from byte position: {last_position}")
 
     current_nmi = None
-    interval_length = FALLBACK_INTERVAL_LENGTH
+    interval_length = None
     batch_values = []
     total_rows_processed = 0
 
-    with psycopg.connect("dbname=dummy", autocommit=True, cursor_factory=psycopg.ClientCursor) as conn:
+    with psycopg.connect(config.settings.postgres_url, autocommit=True, cursor_factory=psycopg.ClientCursor) as conn:
         cur = conn.cursor()
 
         writer = SQLWriter(cursor=cur, output_dir=SQL_OUTPUT)
@@ -66,6 +63,7 @@ def generate_sql_file(source_type="file", source_target=CSV_INPUT):
             def csv_line_generator():
                 for binary_line, current_offset in raw_stream:
                     csv_line_generator.offset = current_offset
+                    offset_tracker["last_seen"] = current_offset
                     yield binary_line.decode('utf-8', errors='ignore')
 
             reader = csv.reader(csv_line_generator())
@@ -168,7 +166,7 @@ def generate_sql_file(source_type="file", source_target=CSV_INPUT):
                         batch_queue.put((batch_values, csv_line_generator.offset))
                         batch_values = []
 
-                elif line_type not in ["200", "300"]:
+                elif line_type not in ["200", "300", "400", "500"]:
                     report_writer.writerow([csv_line_generator.offset, f"UNRECOGNIZED_INDICATOR_{line_type}", row])
                     replay_writer.writerow(row)
                     continue
@@ -190,6 +188,3 @@ def generate_sql_file(source_type="file", source_target=CSV_INPUT):
     print(f"Pipeline Complete! Successfully parsed {total_rows_processed} entries into '{SQL_OUTPUT}'.")
     print(f"Human Report: '{DLQ_REPORT_CSV}' | Raw Replay Queue File: '{DLQ_REPLAY_CSV}'")
     return True
-
-if __name__ == "__main__":
-    generate_sql_file()

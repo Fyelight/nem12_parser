@@ -6,9 +6,13 @@ class Settings(BaseSettings):
     postgres_url: str = "none"
 
     # File path for testing
-    input_file_path: str = "tests/nem12_csv/nem12_test.csv"
+    input_folder_path: str = "tests/nem12_csv"
     output_folder_path: str = "sql_chunks"
     state_file_path: str = "state.txt"
+    completed_files_tracker: str = "processed_files.log"
+
+    batch_size: int = 5000
+    source_type: str = "file"
 
     # Dead-Letter Queue Output Files
     dlq_report_csv: str = "corrupted_lines.csv" # For human analytics review
