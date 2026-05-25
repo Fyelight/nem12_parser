@@ -7,3 +7,5 @@ nem12_env.bak/
 __pycache__/
 *.env
 *.env.prod
+
+output/
