@@ -39,10 +39,9 @@ def main():
     last_position = get_last_byte_position()
 
     # We can read a small companion file or track progress based on completed targets
-    completed_files_tracker = "processed_files.log"
     completed_set = set()
-    if os.path.exists(completed_files_tracker):
-        with open(completed_files_tracker, "r", encoding="utf-8") as log:
+    if os.path.exists(COMPLETED_FILES_TRACKER):
+        with open(COMPLETED_FILES_TRACKER, "r", encoding="utf-8") as log:
             completed_set = set(line.strip() for line in log if line.strip())
 
     try:
@@ -67,7 +66,7 @@ def main():
             if success:
                 print(f"[COMPLETED] Clean compilation execution finished for: {file_name}")
                 # Log completion metadata so this specific file is never re-read on restart
-                with open(completed_files_tracker, "a", encoding="utf-8") as log:
+                with open(COMPLETED_FILES_TRACKER, "a", encoding="utf-8") as log:
                     log.write(f"{file_path}\n")
 
                 # Clear the local byte checkpoint file since the next file starts at position 0

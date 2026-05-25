@@ -31,11 +31,11 @@ class SQLWriter:
         full_query = f'{base_query} {placeholders} ON CONFLICT ("nmi", "timestamp") DO UPDATE SET consumption = EXCLUDED.consumption;\n'
 
         # Secure client-side serialization via psycopg cursor engine
-        safe_sql_bytes = self.cursor.mogrify(full_query, flattened_params)
+        safe_sql_str = self.cursor.mogrify(full_query, flattened_params)
 
         # 3. Write out the isolated file chunk context
         with open(target_file_path, "w", encoding="utf-8") as sql_file:
-            sql_file.write(safe_sql_bytes.decode('utf-8'))
+            sql_file.write(safe_sql_str if isinstance(safe_sql_str, str) else safe_sql_str.decode('utf-8'))
 
         # 4. Advance the index counter for the next incoming batch trigger
         self.chunk_index += 1
