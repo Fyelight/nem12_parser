@@ -35,6 +35,7 @@ def generate_sql_file(source_target: str, source_type=SOURCE_TYPE):
     interval_length = None
     batch_values = []
     total_rows_processed = 0
+    last_200_row = None  # Track the last valid 200 row for replay file context
 
     with psycopg.connect(config.settings.postgres_url, autocommit=True, cursor_factory=psycopg.ClientCursor) as conn:
         cur = conn.cursor()
@@ -80,6 +81,7 @@ def generate_sql_file(source_target: str, source_type=SOURCE_TYPE):
                 # --- 200 ROW: Capture Meter Metadata ---
                 elif line_type == "200":
                     current_nmi = row[1].strip()[:10]
+                    last_200_row = row  # Store this 200 row for replay context
                     try:
                         # Extract interval length rules from column index 8
                         interval_length = int(row[8].strip())
@@ -87,6 +89,7 @@ def generate_sql_file(source_target: str, source_type=SOURCE_TYPE):
                         print(f"ERROR: Corrupt structure in 200 row for meter {current_nmi}. Sent to DLQ.")
                         report_writer.writerow([csv_line_generator.offset, "200_CORRUPT_INTERVAL", row])
                         replay_writer.writerow(row) # Saves pure raw line for easy re-running
+                        last_200_row = None  # Clear the last 200 row on corruption
                         interval_length = None
                         continue
 
@@ -96,11 +99,15 @@ def generate_sql_file(source_target: str, source_type=SOURCE_TYPE):
                 # --- 300 ROW: Extract Consumption and Flatten Columns ---
                 elif line_type == "300":
                     if not current_nmi:
+                        if last_200_row:
+                            replay_writer.writerow(last_200_row)  # Include parent 200 row
                         report_writer.writerow([csv_line_generator.offset, "300_MISSING_200_HEADER", row])
                         replay_writer.writerow(row)
                         continue
 
                     if interval_length is None:
+                        if last_200_row:
+                            replay_writer.writerow(last_200_row)  # Include parent 200 row
                         report_writer.writerow([csv_line_generator.offset, "300_MISSING_INTERVAL_RULE", row])
                         replay_writer.writerow(row)
                         continue
@@ -111,6 +118,8 @@ def generate_sql_file(source_target: str, source_type=SOURCE_TYPE):
 
                     # Guard against truncated or cut lines
                     if len(row) < max_data_idx:
+                        if last_200_row:
+                            replay_writer.writerow(last_200_row)  # Include parent 200 row
                         report_writer.writerow([csv_line_generator.offset, "300_INCOMPLETE_ROW_LENGTH", row])
                         replay_writer.writerow(row)
                         print(f"WARNING: Row too short for date {row[1]}. Sent to DLQ.")
@@ -140,6 +149,8 @@ def generate_sql_file(source_target: str, source_type=SOURCE_TYPE):
 
                     # IF CORRUPT: Drop the whole line, log to DLQ records, keep stream moving!
                     if row_is_corrupt:
+                        if last_200_row:
+                            replay_writer.writerow(last_200_row)  # Include parent 200 row
                         report_writer.writerow([csv_line_generator.offset, error_reason, row])
                         replay_writer.writerow(row) # Ready for re-run later
                         continue
