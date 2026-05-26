@@ -7,7 +7,7 @@ Decision use stream to process line by line or batch
 Assume Huge CSVs and multiple CSV files.
 
 
-**Input types**
+**Input types** 
 	CSV (currently only csv file)
 
 
@@ -17,7 +17,7 @@ Use PostgreSQL
 
 Example
 
-meter_readings
+meter_readings 
 
 TABLE
 ```
@@ -44,7 +44,7 @@ constraint meter_readings_unique_consumption unique ("nmi", "timestamp")
 **Uphold hierarchy info**
 
 200
-	300
+	300 
 	400
 	500
 focus on 200 and 300
@@ -94,14 +94,14 @@ Code should not be the bottleneck but I/O should be the upsert to database (Data
 
 **csv**
 process csv
-	Fast streaming for csv line by line
+	Fast streaming for csv line by line 
 	lazy loading lines -> able to handle large csv files
-
+	
 **psycopg3**
 for fast process of sql database
 	Used Offline mode
 	Security from sql injection attacks as sql generated will be safely formatted
-
+	
 ### Safe guards corner cases
 
 **Invalid files**
@@ -109,7 +109,7 @@ for fast process of sql database
 Check 1st row to see if it is nem12 file
 Check header `100`
 	Don't stop process even if it does not have the header as we can check if the other rows are valid
-End of file `900`
+End of file `900` 
 	 Don't think need validate this but a valid one should have this
 
 
@@ -130,7 +130,7 @@ Store runnable csv file on erroneous row to fix and reran if needed
 
 	Able to expend input stream types if needed
 
-#### Separate thread for the writer and reader
+#### Separate thread for the writer and reader 
 
 	Reader don't need to wait for writer to finish writing
 	Can write to disk without waiting for CPU to run the reader
@@ -147,27 +147,30 @@ Store runnable csv file on erroneous row to fix and reran if needed
 
 **Examples**
 ```
-INSERT INTO meter_readings ("nmi", "timestamp", "consumption")
-VALUES
+INSERT INTO meter_readings ("nmi", "timestamp", "consumption") 
+VALUES 
     ('NEMQ123456', '2026-05-24 00:00:00', 1.25),
     ('NEMQ123456', '2026-05-24 00:15:00', 1.42),
     ('NEMQ123456', '2026-05-24 00:30:00', 0.98),
     ('NEMQ987654', '2026-05-24 00:00:00', 2.10),
     ('NEMQ987654', '2026-05-24 00:15:00', 1.85)
-ON CONFLICT ("nmi", "timestamp")
-DO UPDATE SET
+ON CONFLICT ("nmi", "timestamp") 
+DO UPDATE SET 
     consumption = EXCLUDED.consumption;
 
 ```
 
 #### Minimum batch size is a row of data
 
-This is mainly an accidental feature but I think it is fine to leave it as i dont want the batch size to be too small.
-Hence, when set to a value smaller than the row's data size it will use the upper limit of these.
+When BATCH_SIZE set to a value smaller than the row's data size (example data of 48) it will use the upper limit of these.
+	Using constant data sets of 10 each 300 rows
+		if BATCH_SIZE = 1
+			chunk size will be 10
+		if BATCH_SIZE = 11
+			chunk size will be 20
 
-I also think it is cleaner to have at least a full 300 row to be within the same chunk file.
-There is also an upper limit to the data size of a single row so i think it is ok in terms of scalability.
-
+I also think it is cleaner to have full 300 rows to be within the same chunk file.
+There is also an upper limit to the data size of a single row so it should not have issues in terms of scalability.
 
 ## Potential Additions
 More features if more clarity is provided
