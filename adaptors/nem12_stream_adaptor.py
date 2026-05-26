@@ -5,6 +5,7 @@ class NEM12StreamAdapter:
     Unified streaming adapter.
     Guarantees a standardized, line-by-line binary/text generator
     regardless of whether the input is a local file, web API, or IoT feed.
+    This design allows validation logic to be written here
     """
     def __init__(self, source_type, source_target, checkpoint=0):
         self.source_type = source_type.lower()
@@ -25,9 +26,10 @@ class NEM12StreamAdapter:
                 first_line = f.readline().strip()
                 # Use a comma split check or pattern match
                 if not first_line.startswith("100"):
-                    print(f"CRITICAL ERROR: File '{self.source_target}' does not start with '100'. Aborting.", file=sys.stderr)
-                    sys.exit(1)
-            print("Success: Verified local NEM12 file signature root header.")
+                    print(f"WARNING: File '{self.source_target}' does not start with '100'. Continuing.", file=sys.stderr)
+                    print("Failure: Unable to verify local NEM12 file signature root header.")
+                else:
+                    print("Success: Verified local NEM12 file signature root header.")
 
         # --- MEMORY-SAFE BINARY STREAMING LOOP ---
         with open(self.source_target, "rb") as f:

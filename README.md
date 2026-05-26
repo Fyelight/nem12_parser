@@ -32,7 +32,7 @@ Put the csv in a folder INPUT_FOLDER_PATH
 
 ## Run
 ```
-## .
+## at root folder .
 python main.py
 ```
 
@@ -46,7 +46,7 @@ DLQ_REPLAY_CSV to rerun after fixing error rows
 
 ## Rerun reset
 ```
-# 1. Delete the completion tracking logs at  so Python forgets it processed the file
+# 1. Delete the completion tracking logs at COMPLETED_FILES_TRACKER so Python forgets it processed the file
 rm processed_files.log
 
 # 2. Reset your checkpointer file at STATE_FILE_PATH to byte position 0

@@ -35,7 +35,7 @@ def generate_sql_file(source_target: str, source_type=SOURCE_TYPE):
     interval_length = None
     batch_values = []
     total_rows_processed = 0
-    last_200_row = None  # Track the last valid 200 row for replay file context
+    last_200_row = None
 
     with psycopg.connect(config.settings.postgres_url, autocommit=True, cursor_factory=psycopg.ClientCursor) as conn:
         cur = conn.cursor()
@@ -44,7 +44,6 @@ def generate_sql_file(source_target: str, source_type=SOURCE_TYPE):
         if last_position > 0:
             writer.synchronize_chunk_index() # Re-align index counting after a crash resume
 
-        # Open data handlers, reports, and the clean raw replay queue file handler
         with open(DLQ_REPORT_CSV, "a", encoding="utf-8", newline="") as report_file, \
              open(DLQ_REPLAY_CSV, "a", encoding="utf-8", newline="") as replay_file:
 
@@ -55,8 +54,8 @@ def generate_sql_file(source_target: str, source_type=SOURCE_TYPE):
             # Spin up the background consumer thread task
             offset_tracker = {"last_seen": last_position}
             consumer_thread = threading.Thread(
-                target=writer.start_worker_consumer, # ◄ Targets the class worker method!
-                args=(batch_queue, save_byte_position) # Passes your queue and checkpointer save function
+                target=writer.start_worker_consumer,
+                args=(batch_queue, save_byte_position)
             )
             consumer_thread.daemon = True
             consumer_thread.start()
@@ -107,7 +106,7 @@ def generate_sql_file(source_target: str, source_type=SOURCE_TYPE):
 
                     if interval_length is None:
                         if last_200_row:
-                            replay_writer.writerow(last_200_row)  # Include parent 200 row
+                            replay_writer.writerow(last_200_row)
                         report_writer.writerow([csv_line_generator.offset, "300_MISSING_INTERVAL_RULE", row])
                         replay_writer.writerow(row)
                         continue
@@ -119,10 +118,10 @@ def generate_sql_file(source_target: str, source_type=SOURCE_TYPE):
                     # Guard against truncated or cut lines
                     if len(row) < max_data_idx:
                         if last_200_row:
-                            replay_writer.writerow(last_200_row)  # Include parent 200 row
+                            replay_writer.writerow(last_200_row)
                         report_writer.writerow([csv_line_generator.offset, "300_INCOMPLETE_ROW_LENGTH", row])
                         replay_writer.writerow(row)
-                        print(f"WARNING: Row too short for date {row[1]}. Sent to DLQ.")
+                        print(f"WARNING: Row too short for meter {current_nmi} date {row[1]}. Sent to DLQ.")
                         continue
 
                     # --- FIRST PASS: Scan data slots for gaps or corruption ---
@@ -138,8 +137,9 @@ def generate_sql_file(source_target: str, source_type=SOURCE_TYPE):
                             error_reason = f"MISSING_INTERVAL_AT_COLUMN_{col_idx}"
                             break
 
+                        # Test if it's a valid number
                         try:
-                            float(val_str) # Test if it's a valid number
+                            float(val_str)
                         except ValueError:
                             row_is_corrupt = True
                             error_reason = f"CORRUPT_VALUE_'{val_str}'_AT_COLUMN_{col_idx}"
