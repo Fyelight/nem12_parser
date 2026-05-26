@@ -8,7 +8,7 @@ class Settings(BaseSettings):
     # File path for testing
     input_folder_path: str = "tests/nem12_csv"
     output_folder_path: str = "output/sql_chunks"
-    state_file_path: str = "output/state.txt"
+    state_file_path: str = "output/state.json"
     completed_files_tracker: str = "output/processed_files.log"
 
     batch_size: int = 5000

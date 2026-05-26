@@ -1,86 +1,58 @@
+import json
 import os
-import csv
-import time
-import config.settings as config
+from typing import List, Optional
+from dataclasses import asdict, dataclass, field
 
-STATE_FILE = config.settings.state_file_path
+@dataclass
+class State:
+    current_file: Optional[str] = None
+    last_byte_position: int = 0
+    completed_files: List[str] = field(default_factory=list)
 
-def get_last_byte_position():
-    """Reads the last successfully processed byte position."""
-    if os.path.exists(STATE_FILE):
-        with open(STATE_FILE, "r") as f:
-            try:
-                return int(f.read().strip())
-            except ValueError:
-                return 0
-    return 0
+    def reset_current_file(self):
+        """Resets the cursor but keeps historical logs."""
+        self.current_file = None
+        self.last_byte_position = 0
 
-def save_byte_position(position):
-    """Atomically saves the progress to avoid state file corruption."""
-    temp_state = f"{STATE_FILE}.tmp"
-    with open(temp_state, "w") as f:
-        f.write(str(position))
-    os.replace(temp_state, STATE_FILE) # Atomic swap on OS level
+    def to_json(self) -> str:
+        """Converts the internal state directly to a JSON string."""
+        return json.dumps(asdict(self), indent=4)
 
-def process_nem12_row(row):
-    """
-    Your core logic. NEM12 files use Record Indicators (100, 200, 300).
-    Handle your database insertions or business math here.
-    """
-    if not row:
-        return
+    @classmethod
+    def load_from_file(cls, file_path: str) -> "State":
+        """Factory method to load state from disk, or return a clean instance."""
+        # Convert to an absolute path so threads never lose the folder context
+        abs_file_path = os.path.abspath(file_path)
 
-    record_indicator = row[0]
+        if os.path.exists(abs_file_path):
+            with open(abs_file_path, "r", encoding="utf-8") as f:
+                try:
+                    data = json.load(f)
+                    return cls(**data)
+                except (json.JSONDecodeError, TypeError, Exception) as e:
+                    print(f"[State Engine Alert] State file corrupted ({e}). Resetting memory configuration.")
 
-    if record_indicator == "200":
-        # This is an interval header row (contains NMI/Meter ID)
-        print(f"Reading Meter: {row[1]}")
-    elif record_indicator == "300":
-        # This contains the actual energy usage intervals
-        print(f"Processing intervals for date: {row[1]}")
-        # IDEMPOTENCY TIP: Use a compound database key like (MeterID + Date)
-        # to ensure re-running a line never creates duplicate data.
+        return cls()
 
-def stream_nem12_file(file_path):
-    # 1. Get our last saved position
-    last_position = get_last_byte_position()
-    print(f"Starting pipeline. Resuming from byte: {last_position}")
+    def save_to_file(self, file_path: str):
+        """Atomically and thread-safely dumps the state data to a file."""
+        # Convert to an absolute path so threads never lose the folder context
+        abs_file_path = os.path.abspath(file_path)
 
-    # 2. Open file in binary mode ('rb') so f.tell() returns exact byte offsets
-    with open(file_path, "rb") as f:
-        # Jump directly to where we crashed or left off last time
-        f.seek(last_position)
+        # Append the thread ID to the temp file name so concurrent writes
+        # never overwrite or delete each other's temporary files!
+        import threading
+        temp_file = f"{abs_file_path}.{threading.get_ident()}.tmp"
 
-        # Wrap the binary stream in a text decoder for the CSV reader
-        # errors='ignore' ensures a single malformed character won't crash the whole terabyte stream
-        text_stream = (line.decode('utf-8', errors='ignore') for line in f)
-        csv_reader = csv.reader(text_stream)
-
-        for row in csv_reader:
-            process_nem12_row(row)
-
-            # 3. Track progress and periodically save state
-            # Saving every single row slows down performance. Saving every 1,000 rows is safer.
-            current_position = f.tell()
-
-            # For maximum safety, you can save every loop, or batch it
-            save_byte_position(current_position)
-
-# --- THE 1-MINUTE CRON / LOOP ---
-# This loop simulates checking for new data or restarting after a crash
-if __name__ == "__main__":
-    TARGET_FILE = "massive_nem12_feed.csv"
-
-    if not os.path.exists(TARGET_FILE):
-        # Create empty file if testing
-        open(TARGET_FILE, 'a').close()
-
-    while True:
-        print("Checking for new data or resuming stream...")
         try:
-            stream_nem12_file(TARGET_FILE)
-        except Exception as e:
-            print(f"Network or System Error encountered: {e}. Retrying safely in 60 seconds...")
+            # Write the unique temp file
+            with open(temp_file, "w", encoding="utf-8") as f:
+                f.write(self.to_json())
 
-        # Wait 1 minute before checking for newly appended rows or retrying a failed stream
-        time.sleep(60)
+            # Atomic swap into the main file destination
+            os.replace(temp_file, abs_file_path)
+        except Exception as e:
+            # Clean up the specific temp file if anything fails mid-write
+            if os.path.exists(temp_file):
+                os.remove(temp_file)
+            print(f"[State Engine Warning] Thread failed to write checkpoint safely: {e}")

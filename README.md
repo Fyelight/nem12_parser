@@ -14,7 +14,7 @@ INPUT_FOLDER_PATH=tests/nem12_csv
 
 OUTPUT_FOLDER_PATH=output/sql_chunks
 
-STATE_FILE_PATH=output/state.txt
+STATE_FILE_PATH=output/state.json
 
 COMPLETED_FILES_TRACKER=output/processed_files.log
 
@@ -46,10 +46,20 @@ DLQ_REPLAY_CSV to rerun after fixing error rows
 
 ## Rerun reset
 ```
-# 1. Delete the completion tracking logs at COMPLETED_FILES_TRACKER so Python forgets it processed the file
-rm processed_files.log
+# Delete the state file. When Python restarts, it will auto-generate a fresh, empty state.
+rm state.json
 
-# 2. Reset your checkpointer file at STATE_FILE_PATH to byte position 0
-echo "0" > state.txt
+# or update state.json to control what to re-process
+{
+    "current_file": "./tests/nem12_csv/massive_feed_3.csv",
+    "last_byte_position": 0,
+    "completed_files": [
+        "./tests/nem12_csv/massive_feed_1.csv",
+        "./tests/nem12_csv/massive_feed_2.csv"
+    ]
+}
+
+# (Optional) Wipe your passive history text ledger just to keep things clean
+rm processed_files.log
 ```
 

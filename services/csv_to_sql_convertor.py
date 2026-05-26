@@ -1,8 +1,8 @@
 import csv
-from adaptors.nem12_stream_adaptor import NEM12StreamAdapter
 from datetime import timedelta
+from adaptors.nem12_stream_adaptor import NEM12StreamAdapter
 from utils.datetime_formatter import format_date
-from utils.checkpointer import get_last_byte_position, save_byte_position
+from utils.checkpointer import State
 import config.settings as config
 
 # Configuration
@@ -11,14 +11,26 @@ DLQ_REPORT_CSV = config.settings.dlq_report_csv
 DLQ_REPLAY_CSV = config.settings.dlq_replay_csv
 SOURCE_TYPE = config.settings.source_type.lower()
 BATCH_SIZE = config.settings.batch_size
+STATE_FILE = config.settings.state_file_path
 
 def generate_sql_file(source_target: str, batch_queue, source_type=SOURCE_TYPE, batch_values=None, offset_tracker=None, batch_size=BATCH_SIZE):
     if batch_values is None:
         batch_values = []
-    if offset_tracker is None:
-        offset_tracker = {"last_seen": get_last_byte_position()}
 
-    last_position = get_last_byte_position()
+    # --- CRITICAL RECOVERY GUARD ---
+    # Load the state object. Only resume from an offset if this specific file matches the crashed state reference.
+    state = State.load_from_file(STATE_FILE)
+    if state.current_file == source_target:
+        last_position = state.last_byte_position
+        print(f"[RECOVERY] Disrupted state match found. Seeking to byte position: {last_position}")
+    else:
+        last_position = 0
+
+    if offset_tracker is None:
+        offset_tracker = {"last_seen": last_position}
+    else:
+        offset_tracker["last_seen"] = last_position
+
     file_mode = "a" if last_position > 0 else "w"
 
     print(f"Initializing adapter pipeline for source [{source_type.upper()}]...")
@@ -27,15 +39,11 @@ def generate_sql_file(source_target: str, batch_queue, source_type=SOURCE_TYPE, 
     raw_stream = adapter.get_stream()
 
     print(f"Starting pipeline: '{source_target}' -> '{SQL_OUTPUT}' (Mode: {file_mode})")
-    print(f"Resuming file stream pointer from byte position: {last_position}")
 
     current_nmi = None
     interval_length = None
-    total_rows_processed = 0
+    total_data_processed = 0
     last_200_row = None
-
-    consumer_thread = None
-    should_manage_worker = False
 
     with open(DLQ_REPORT_CSV, "a", encoding="utf-8", newline="") as report_file, \
          open(DLQ_REPLAY_CSV, "a", encoding="utf-8", newline="") as replay_file:
@@ -57,7 +65,7 @@ def generate_sql_file(source_target: str, batch_queue, source_type=SOURCE_TYPE, 
 
             line_type = row[0].strip()
 
-            if line_type == "100" or line_type == "900":
+            if line_type in ("100", "900"):
                 continue
 
             # --- 200 ROW: Capture Meter Metadata ---
@@ -70,8 +78,8 @@ def generate_sql_file(source_target: str, batch_queue, source_type=SOURCE_TYPE, 
                 except (ValueError, IndexError):
                     print(f"ERROR: Corrupt structure in 200 row for meter {current_nmi}. Sent to DLQ.")
                     report_writer.writerow([csv_line_generator.offset, "200_CORRUPT_INTERVAL", row])
-                    replay_writer.writerow(row) # Saves pure raw line for easy re-running
-                    last_200_row = None  # Clear the last 200 row on corruption
+                    replay_writer.writerow(row)  # Saves pure raw line for easy re-running
+                    last_200_row = None  # Clear context on corruption
                     interval_length = None
                     continue
 
@@ -135,7 +143,7 @@ def generate_sql_file(source_target: str, batch_queue, source_type=SOURCE_TYPE, 
                     if last_200_row:
                         replay_writer.writerow(last_200_row)  # Include parent 200 row
                     report_writer.writerow([csv_line_generator.offset, error_reason, row])
-                    replay_writer.writerow(row) # Ready for re-run later
+                    replay_writer.writerow(row)  # Ready for re-run later
                     continue
 
                 # --- SECOND PASS: If row is clean, safe processing execution runs ---
@@ -152,19 +160,19 @@ def generate_sql_file(source_target: str, batch_queue, source_type=SOURCE_TYPE, 
                     pg_timestamp = current_time.strftime("%Y-%m-%d %H:%M:%S")
 
                     batch_values.append((current_nmi, pg_timestamp, consumption))
-                    total_rows_processed += 1
+                    total_data_processed += 1
                     col_idx += 1
 
-                # Trigger database multi-row batch inserts via checkpointer tracking
+                # Trigger database multi-row batch inserts via queue pass off
                 if len(batch_values) >= batch_size:
                     batch_queue.put((batch_values.copy(), csv_line_generator.offset))
                     batch_values.clear()
 
-            elif line_type not in ["200", "300", "400", "500"]:
+            elif line_type not in ("400", "500"):
                 report_writer.writerow([csv_line_generator.offset, f"UNRECOGNIZED_INDICATOR_{line_type}", row])
                 replay_writer.writerow(row)
                 continue
 
-    print(f"Pipeline Complete! Successfully parsed {total_rows_processed} entries into '{SQL_OUTPUT}'.")
+    print(f"Pipeline Complete! Successfully parsed {total_data_processed} entries into '{SQL_OUTPUT}'.")
     print(f"Human Report: '{DLQ_REPORT_CSV}' | Raw Replay Queue File: '{DLQ_REPLAY_CSV}'")
     return True
